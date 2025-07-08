@@ -1,0 +1,267 @@
+name: Update Repository Stars and Deploy
+
+on:
+  schedule:
+    # Run every 7 days at 00:00 UTC (Sunday)
+    - cron: '0 0 * * 0'
+  workflow_dispatch: # Allow manual trigger
+  push:
+    branches: [ main, master ]
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  update-stars:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Update repository stars
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Create update script
+          cat > update_stars.js << 'EOF'
+          const fs = require('fs');
+          const https = require('https');
+
+          async function getRepoData(owner, name) {
+            return new Promise((resolve, reject) => {
+              const options = {
+                hostname: 'api.github.com',
+                path: `/repos/${owner}/${name}`,
+                method: 'GET',
+                headers: {
+                  'User-Agent': 'GitHub-Actions',
+                  'Authorization': `token ${process.env.GITHUB_TOKEN}`
+                }
+              };
+
+              const req = https.request(options, (res) => {
+                let data = '';
+                res.on('data', (chunk) => data += chunk);
+                res.on('end', () => {
+                  if (res.statusCode === 200) {
+                    const repo = JSON.parse(data);
+                    resolve({
+                      owner,
+                      name: repo.name,
+                      stars: repo.stargazers_count,
+                      forks: repo.forks_count,
+                      fullName: `${owner}/${name}`
+                    });
+                  } else {
+                    console.error(`Error fetching ${owner}/${name}: ${res.statusCode}`);
+                    resolve({ owner, name, stars: 0, forks: 0, fullName: `${owner}/${name}` });
+                  }
+                });
+              });
+
+              req.on('error', (err) => {
+                console.error(`Request error for ${owner}/${name}:`, err);
+                resolve({ owner, name, stars: 0, forks: 0, fullName: `${owner}/${name}` });
+              });
+
+              req.end();
+            });
+          }
+
+          async function getUserData(username) {
+            return new Promise((resolve, reject) => {
+              const options = {
+                hostname: 'api.github.com',
+                path: `/users/${username}`,
+                method: 'GET',
+                headers: {
+                  'User-Agent': 'GitHub-Actions',
+                  'Authorization': `token ${process.env.GITHUB_TOKEN}`
+                }
+              };
+
+              const req = https.request(options, (res) => {
+                let data = '';
+                res.on('data', (chunk) => data += chunk);
+                res.on('end', () => {
+                  if (res.statusCode === 200) {
+                    const user = JSON.parse(data);
+                    resolve({
+                      repos: user.public_repos,
+                      followers: user.followers,
+                      following: user.following
+                    });
+                  } else {
+                    console.error(`Error fetching user data: ${res.statusCode}`);
+                    resolve({ repos: 0, followers: 0, following: 0 });
+                  }
+                });
+              });
+
+              req.on('error', (err) => {
+                console.error(`Request error for user data:`, err);
+                resolve({ repos: 0, followers: 0, following: 0 });
+              });
+
+              req.end();
+            });
+          }
+
+          async function updateHTML() {
+            console.log('Scanning HTML for GitHub repositories...');
+            
+            // Read current HTML
+            let html = fs.readFileSync('index.html', 'utf8');
+            
+            // Get user stats for hypnguyen1209
+            console.log('Fetching user statistics...');
+            const userData = await getUserData('hypnguyen1209');
+            console.log(`User stats: ${userData.repos} repos, ${userData.followers} followers`);
+            
+            // Update stats section
+            const statsRegex = /(<div class="stats">\s*)(\d+)(\s*repos\s*\/\s*)(\d+)(\s*followers\s*<\/div>)/;
+            if (statsRegex.test(html)) {
+              html = html.replace(statsRegex, `$1${userData.repos}$3${userData.followers}$5`);
+              console.log(`Updated stats: ${userData.repos} repos / ${userData.followers} followers`);
+            } else {
+              console.log('Stats section not found or format not recognized');
+            }
+            
+            // Extract all GitHub repository links from the projects section
+            const projectsSection = html.match(/<div class="projects">([\s\S]*?)<\/div>/);
+            if (!projectsSection) {
+              console.log('No projects section found');
+              return;
+            }
+            
+            const projectsContent = projectsSection[1];
+            
+            // Find all GitHub repository links
+            const repoRegex = /href="https:\/\/github\.com\/([^\/]+)\/([^"]+)"/g;
+            const repos = [];
+            let match;
+            
+            while ((match = repoRegex.exec(projectsContent)) !== null) {
+              const owner = match[1];
+              const name = match[2];
+              
+              // Skip if it's a link to all repositories or user profile
+              if (name.includes('?tab=repositories') || name === owner) {
+                continue;
+              }
+              
+              repos.push({ owner, name });
+            }
+            
+            console.log(`Found ${repos.length} repositories to track:`);
+            repos.forEach(repo => console.log(`  - ${repo.owner}/${repo.name}`));
+            
+            // Fetch all repository data
+            const repoData = {};
+            for (const repo of repos) {
+              const data = await getRepoData(repo.owner, repo.name);
+              repoData[data.fullName] = data;
+              console.log(`${data.fullName}: ${data.stars} stars, ${data.forks} forks`);
+            }
+            
+            // Update star counts for each repository
+            for (const repo of repos) {
+              const fullName = `${repo.owner}/${repo.name}`;
+              const data = repoData[fullName];
+              
+              if (!data || data.stars === 0) continue;
+              
+              // Escape special regex characters in the repository name
+              const escapedOwner = repo.owner.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+              const escapedName = repo.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+              
+              // Try to update existing star count first
+              const existingStarRegex = new RegExp(
+                `(<a href="https:\\/\\/github\\.com\\/${escapedOwner}\\/${escapedName}">${escapedName}<\\/a>[^(]*\\()(\\d+)(★\\))`,
+                'g'
+              );
+              
+              if (existingStarRegex.test(html)) {
+                // Update existing star count
+                html = html.replace(existingStarRegex, `$1${data.stars}$3`);
+                console.log(`Updated ${fullName}: ${data.stars} stars`);
+              } else {
+                // Try to add star count if the repo has stars
+                const addStarRegex = new RegExp(
+                  `(<a href="https:\\/\\/github\\.com\\/${escapedOwner}\\/${escapedName}">${escapedName}<\\/a>[^\\n]*?)(?=\\n|$)`,
+                  'g'
+                );
+                
+                if (addStarRegex.test(html)) {
+                  html = html.replace(addStarRegex, `$1 (${data.stars}★)`);
+                  console.log(`Added stars to ${fullName}: ${data.stars} stars`);
+                }
+              }
+            }
+
+            // Write updated HTML
+            fs.writeFileSync('index.html', html);
+            console.log('HTML updated successfully!');
+          }
+
+          updateHTML().catch(console.error);
+          EOF
+
+          # Run the update script
+          node update_stars.js
+
+      - name: Check for changes
+        id: verify-changed-files
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit and push changes
+        if: steps.verify-changed-files.outputs.changed == 'true'
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add index.html
+          git commit -m "🤖 Auto-update repository star counts"
+          git push
+
+  deploy:
+    needs: update-stars
+    runs-on: ubuntu-latest
+    if: always() # Run even if update-stars fails
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: '.'
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
