@@ -228,11 +228,14 @@ jobs:
 
           # Run the update script
           node update_stars.js
+          
+          # Clean up temporary script file
+          rm update_stars.js
 
       - name: Check for changes
         id: verify-changed-files
         run: |
-          if [ -n "$(git status --porcelain)" ]; then
+          if [ -n "$(git status --porcelain index.html)" ]; then
             echo "changed=true" >> $GITHUB_OUTPUT
           else
             echo "changed=false" >> $GITHUB_OUTPUT
