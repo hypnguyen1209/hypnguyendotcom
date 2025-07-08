@@ -1,4 +1,4 @@
-# Nguyen Van Hiep - Portfolio Website
+# hypnguyen(dot)com
 
 A minimalist portfolio website that automatically updates repository star counts and deploys to GitHub Pages.
 
