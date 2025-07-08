@@ -5,7 +5,8 @@ A minimalist portfolio website that automatically updates repository star counts
 ## 🚀 Features
 
 - **Ultra-minimalist design** - Single-section layout with essential information
-- **Auto-updating star counts** - GitHub Actions automatically fetch and update repository stars every 7 days
+- **Auto-updating stats** - GitHub Actions automatically fetch and update user stats (repos/followers) and repository stars every 7 days
+- **Dynamic repository tracking** - Automatically detects and tracks any GitHub repositories linked in your projects section
 - **Automated deployment** - Deploys to GitHub Pages on every push
 - **Responsive design** - Works on all device sizes
 
@@ -22,7 +23,7 @@ A minimalist portfolio website that automatically updates repository star counts
 
 The repository includes two workflows:
 
-- **`update-stars-and-deploy.yml`** - Runs every 7 days to update star counts and deploy
+- **`update-stars-and-deploy.yml`** - Runs every 7 days to update user stats, repository star counts, and deploy
 - **`deploy.yml`** - Deploys on every push to main/master branch
 
 ### 3. Custom Domain (Optional)
@@ -68,8 +69,11 @@ Ensure the GitHub Actions have proper permissions:
 ## 🔄 How It Works
 
 1. **Scheduled Updates**: Every Sunday at midnight UTC, GitHub Actions:
-   - Fetches current star counts from GitHub API
-   - Updates the HTML file with new star counts
+   - Fetches current user statistics (total repos and followers)
+   - Updates the stats section with current numbers
+   - Scans for all GitHub repository links in the projects section
+   - Fetches current star counts from GitHub API for each repository
+   - Updates existing star counts or adds star counts to repositories that have them
    - Commits changes if any updates were made
    - Deploys the updated site
 
@@ -79,11 +83,11 @@ Ensure the GitHub Actions have proper permissions:
 
 ## 🛠 Customization
 
-To modify the repositories being tracked:
+The workflow automatically detects and tracks any GitHub repositories you link to in your projects section. To modify what gets tracked:
 
-1. Edit the `repos` array in the workflow file
-2. Update the corresponding HTML content in `index.html`
-3. Adjust the regex patterns in the update script
+1. **Add/Remove repositories**: Simply edit the repository links in the `<div class="projects">` section of `index.html`
+2. **The workflow automatically adapts**: No need to manually update the workflow file
+3. **User stats**: Automatically tracks `hypnguyen1209` - change the username in the workflow if needed
 
 ## 📝 License
 

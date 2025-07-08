@@ -182,7 +182,7 @@ jobs:
               const fullName = `${repo.owner}/${repo.name}`;
               const data = repoData[fullName];
               
-              if (!data || data.stars === 0) continue;
+              if (!data) continue;
               
               // Escape special regex characters in the repository name
               const escapedOwner = repo.owner.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -198,17 +198,23 @@ jobs:
                 // Update existing star count
                 html = html.replace(existingStarRegex, `$1${data.stars}$3`);
                 console.log(`Updated ${fullName}: ${data.stars} stars`);
-              } else {
-                // Try to add star count if the repo has stars
+              } else if (data.stars > 0) {
+                // Try to add star count if the repo has stars and no existing count
                 const addStarRegex = new RegExp(
-                  `(<a href="https:\\/\\/github\\.com\\/${escapedOwner}\\/${escapedName}">${escapedName}<\\/a>[^\\n]*?)(?=\\n|$)`,
+                  `(<a href="https:\\/\\/github\\.com\\/${escapedOwner}\\/${escapedName}">${escapedName}<\\/a>[^\\n]*?)(?=\\n|<)`,
                   'g'
                 );
                 
-                if (addStarRegex.test(html)) {
-                  html = html.replace(addStarRegex, `$1 (${data.stars}★)`);
+                const beforeUpdate = html;
+                html = html.replace(addStarRegex, `$1 (${data.stars}★)`);
+                
+                if (html !== beforeUpdate) {
                   console.log(`Added stars to ${fullName}: ${data.stars} stars`);
+                } else {
+                  console.log(`Failed to add stars to ${fullName} - pattern not matched`);
                 }
+              } else {
+                console.log(`Skipping ${fullName}: 0 stars`);
               }
             }
 
